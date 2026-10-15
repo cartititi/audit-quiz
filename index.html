@@ -3506,7 +3506,7 @@ const KEY = 'audit-mastery-quiz-v1';
 /* ---------- 저장 ---------- */
 let S = {lv:{}, n:{}, wrong:[], bm:[], ses:null, last:{}, theme:'system'};
 try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(S, JSON.parse(raw)); } catch (e) {}
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function save(fromRemote) { if (!fromRemote) S.at = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} if (!fromRemote && typeof ghSchedule === 'function') ghSchedule(); }
 function applyTheme() { if (S.theme === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = S.theme; }
 applyTheme();
 
@@ -3628,7 +3628,7 @@ function homeView() {
   const daily = dailyIds();
   const dW = daily.filter(id => isWrong(id)).length, dN = daily.filter(id => S.lv[id] === undefined).length;
   return `
-  <header class="topbar"><h1>회계감사 숙지 퀴즈</h1><span class="sp"></span><span class="ref">W/P 01–05</span></header>
+  <header class="topbar"><h1>회계감사 숙지 퀴즈</h1><span class="sp"></span>${GHS && GHS.gist ? `<button class="iconbtn small" id="ghHome" data-go="save">☁ ${esc(ghStatus || '연결됨')}</button>` : `<button class="iconbtn small" data-go="save">☁ 기기 동기화</button>`}</header>
   <div class="stack" style="margin-top:14px">
     <section class="card stack" aria-label="전체 숙지 현황">
       <div class="eyebrow">전체 숙지 (2번 연속 맞히면 숙지)</div>
@@ -3743,14 +3743,15 @@ bind.bm = () => bindList('bm');
 function toggleBm(id) { if (S.bm.includes(id)) S.bm = S.bm.filter(x => x !== id); else S.bm.push(id); save(); }
 
 /* ---------- 저장 코드 ---------- */
-function makeCode() {
+function payload() {
   // 숙지 단계는 문제 순서대로 한 글자씩(-: 안 푼 문제)로 압축
   const L = QS.map(q => S.lv[q.id] === undefined ? '-' : String(S.lv[q.id])).join('');
-  const data = {v: 2, wrong: S.wrong, bm: S.bm, L, ses: S.ses ? {mode: S.ses.mode, title: S.ses.title, q: S.ses.q, i: S.ses.i, exam: S.ses.exam, sec: S.ses.sec} : null};
-  return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+  return {v: 2, wrong: S.wrong, bm: S.bm, L, at: S.at || 0, ses: S.ses ? {mode: S.ses.mode, title: S.ses.title, q: S.ses.q, i: S.ses.i, exam: S.ses.exam, sec: S.ses.sec} : null};
 }
-function readCode(code) {
-  const d = JSON.parse(decodeURIComponent(escape(atob(code.replace(/\s+/g, '')))));
+function makeCode() { return btoa(unescape(encodeURIComponent(JSON.stringify(payload())))); }
+function applyData(d) { S.wrong = d.wrong; S.bm = d.bm; S.lv = d.lv; if (Object.keys(d.n).length) S.n = d.n; S.ses = d.ses; }
+function readCode(code) { return parseData(JSON.parse(decodeURIComponent(escape(atob(code.replace(/\s+/g, '')))))); }
+function parseData(d) {
   if (!d || typeof d !== 'object' || (!Array.isArray(d.wrong) && !d.lv && !d.L)) throw new Error('형식');
   const ok = id => !!QMAP[id];
   return {
@@ -3761,15 +3762,76 @@ function readCode(code) {
     ses: d.ses && Array.isArray(d.ses.q) && d.ses.q.every(ok) ? Object.assign({res: [], req: {}}, d.ses) : null,
   };
 }
+
+/* ---------- GitHub 동기화 (내 계정의 비공개 Gist에 저장) ---------- */
+const GHKEY = KEY + '-github', GFILE = 'audit-quiz-progress.json', GAPI = 'https://api.github.com';
+let GHS = null; try { GHS = JSON.parse(localStorage.getItem(GHKEY) || 'null'); } catch (e) {}
+let ghStatus = GHS ? '연결됨' : '', ghTimer = null, ghBusy = false;
+function ghSaveCfg() { try { GHS ? localStorage.setItem(GHKEY, JSON.stringify(GHS)) : localStorage.removeItem(GHKEY); } catch (e) {} }
+async function gh(path, opt = {}) {
+  const r = await fetch(GAPI + path, Object.assign({}, opt, {headers: {'Authorization': 'Bearer ' + GHS.token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'}}));
+  if (r.status === 401) throw new Error('토큰이 만료됐거나 잘못됐어요');
+  if (r.status === 403 || r.status === 404) throw new Error('Gist 권한이 없는 토큰이에요');
+  if (!r.ok) throw new Error('GitHub 응답 오류 ' + r.status);
+  return r.json();
+}
+function ghSetStatus(t) { ghStatus = t; const el = document.getElementById('ghStat'); if (el) el.textContent = t; const h = document.getElementById('ghHome'); if (h) h.textContent = '☁ ' + t; }
+const hhmm = () => new Date().toTimeString().slice(0, 5);
+async function ghConnect(token) {
+  GHS = {token};
+  const me = await gh('/user'); GHS.login = me.login;
+  let found = null;
+  for (let page = 1; page <= 5 && !found; page++) {
+    const list = await gh(`/gists?per_page=100&page=${page}`);
+    found = list.find(g => g.files && g.files[GFILE]); if (list.length < 100) break;
+  }
+  if (found) { GHS.gist = found.id; ghSaveCfg(); await ghPull(true); }
+  else { const g = await gh('/gists', {method: 'POST', body: JSON.stringify({description: '회계감사 숙지 퀴즈 진행 기록', public: false, files: {[GFILE]: {content: JSON.stringify(payload())}}})}); GHS.gist = g.id; ghSaveCfg(); ghSetStatus('새 기록 만듦 · ' + hhmm()); }
+}
+async function ghPull(silent) {
+  if (!GHS || !GHS.gist) return;
+  ghSetStatus('불러오는 중…');
+  const g = await gh('/gists/' + GHS.gist); const f = g.files[GFILE];
+  let txt = f.content; if (f.truncated) txt = await (await fetch(f.raw_url)).text();
+  const remote = JSON.parse(txt);
+  if ((remote.at || 0) > (S.at || 0)) { applyData(parseData(remote)); S.at = remote.at; save(true); ghSetStatus('불러옴 · ' + hhmm()); if (view !== 'quiz') render(); if (!silent) toast('GitHub 기록을 불러왔어요'); }
+  else if ((S.at || 0) > (remote.at || 0)) await ghPush();
+  else ghSetStatus('동기화됨 · ' + hhmm());
+}
+async function ghPush() {
+  if (!GHS || !GHS.gist || ghBusy) return; ghBusy = true;
+  try { await gh('/gists/' + GHS.gist, {method: 'PATCH', body: JSON.stringify({files: {[GFILE]: {content: JSON.stringify(payload())}}})}); ghSetStatus('저장됨 · ' + hhmm()); }
+  catch (e) { ghSetStatus('저장 실패: ' + e.message); } finally { ghBusy = false; }
+}
+function ghSchedule() { if (!GHS || !GHS.gist) return; clearTimeout(ghTimer); ghSetStatus('저장 대기…'); ghTimer = setTimeout(ghPush, 2500); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && ghTimer) { clearTimeout(ghTimer); ghPush(); } });
+
 let armed = null;
 function saveView() {
   const code = makeCode();
   return `
-  <header class="topbar"><h1>저장 코드</h1></header>
+  <header class="topbar"><h1>저장</h1></header>
   <div class="stack" style="margin-top:12px">
     <section class="card stack">
       <div class="eyebrow">자동 저장</div>
-      <p class="small" style="margin:0">문제를 하나 풀 때마다 이 브라우저에 자동 저장됩니다(중간에 닫아도 홈에 ‘이어서 하기’). 다른 기기나 다른 브라우저로 옮길 때는 아래 코드를 쓰세요.</p>
+      <p class="small" style="margin:0">문제를 하나 풀 때마다 이 브라우저에 자동 저장됩니다(중간에 닫아도 홈에 ‘이어서 하기’). 다른 기기와 이어서 하려면 GitHub 연결이나 저장 코드를 쓰세요.</p>
+    </section>
+    <section class="card stack">
+      <div class="eyebrow">GitHub로 기기 간 자동 저장</div>
+      ${GHS && GHS.gist ? `<div class="row" style="justify-content:space-between"><span><b>@${esc(GHS.login || '')}</b> 연결됨</span><span class="small muted" id="ghStat">${esc(ghStatus)}</span></div>
+      <p class="small muted" style="margin:0">문제를 풀 때마다 내 GitHub 계정의 비공개 Gist(${esc(GFILE)})에 저장되고, 다른 기기에서 같은 토큰을 넣으면 이어서 풀 수 있어요.</p>
+      <div class="row"><button class="btn" id="ghPull" style="flex:1">지금 불러오기</button><button class="btn" id="ghPush" style="flex:1">지금 저장</button></div>
+      <button class="btn" id="ghOff" style="color:var(--muted)">이 기기에서 연결 해제</button>`
+      : `<p class="small" style="margin:0">GitHub 토큰을 한 번 넣으면 진행 기록이 <b>내 계정의 비공개 Gist</b>에 자동 저장돼요. 폰·노트북에 같은 토큰을 넣으면 같은 기록으로 이어집니다.</p>
+      <ol class="small notes" style="gap:4px">
+        <li>GitHub 로그인 → <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">토큰 만들기 (Fine-grained)</a></li>
+        <li>Repository access는 <b>Public repositories</b> 그대로, Permissions에서 <b>Gists → Read and write</b>만 켜기</li>
+        <li>만들어진 <span class="mono">github_pat_…</span> 토큰을 아래에 붙여 넣기 (메모 앱에 따로 보관)</li>
+      </ol>
+      <input class="field mono" id="ghTok" type="password" autocomplete="off" placeholder="github_pat_...">
+      <div id="ghMsg" class="small"></div>
+      <button class="btn pri" id="ghGo">연결</button>
+      <p class="small muted" style="margin:0">토큰은 이 기기 브라우저에만 저장되고 저장 코드에는 들어가지 않아요. Gist 권한만 있는 토큰을 쓰세요.</p>`}
     </section>
     <section class="card stack">
       <div class="eyebrow">내 저장 코드 · ${code.length}자</div>
@@ -3795,12 +3857,18 @@ function saveView() {
   </div>`;
 }
 bind.save = () => {
+  const go1 = $('#ghGo'); if (go1) go1.onclick = async () => { const t = $('#ghTok').value.trim(), m = $('#ghMsg'); if (!t) { m.textContent = '토큰을 붙여 넣으세요.'; return; }
+    go1.disabled = true; m.style.color = ''; m.textContent = '연결하는 중…';
+    try { await ghConnect(t); toast('GitHub에 연결했어요'); render(); } catch (e) { GHS = null; ghSaveCfg(); m.style.color = 'var(--wrong)'; m.textContent = e.message === 'Failed to fetch' ? 'GitHub에 접속할 수 없어요(인터넷 연결 확인).' : e.message; go1.disabled = false; } };
+  const p1 = $('#ghPull'); if (p1) p1.onclick = () => ghPull().catch(e => ghSetStatus('실패: ' + e.message));
+  const p2 = $('#ghPush'); if (p2) p2.onclick = () => ghPush();
+  const off = $('#ghOff'); if (off) off.onclick = () => { if (armed !== 'off') { armed = 'off'; off.textContent = '한 번 더 누르면 이 기기에서 토큰을 지웁니다'; return; } GHS = null; ghSaveCfg(); armed = null; ghStatus = ''; render(); };
   $('#copyCode').onclick = async () => { const t = $('#myCode'); try { await navigator.clipboard.writeText(t.value); toast('복사했어요'); } catch (e) { t.focus(); t.select(); toast('선택된 코드를 직접 복사하세요'); } };
   $('#loadCode').onclick = () => {
     const v = $('#inCode').value.trim(); const msg = $('#inMsg');
     let d; try { d = readCode(v); } catch (e) { msg.style.color = 'var(--wrong)'; msg.textContent = '코드를 읽을 수 없어요. 처음부터 끝까지 빠짐없이 붙여 넣었는지 확인하세요.'; armed = null; return; }
     if (armed !== 'load') { armed = 'load'; const keep = v; render(); $('#inCode').value = keep; $('#inMsg').textContent = `오답 ${d.wrong.length} · 북마크 ${d.bm.length} · 숙지 기록 ${Object.keys(d.lv).length}개가 들어 있어요.`; return; }
-    S.wrong = d.wrong; S.bm = d.bm; S.lv = d.lv; if (Object.keys(d.n).length) S.n = d.n; S.ses = d.ses; armed = null; save(); toast('불러왔어요'); go('home');
+    applyData(d); armed = null; save(); toast('불러왔어요'); go('home');
   };
   $('#reset').onclick = () => { if (armed !== 'reset') { armed = 'reset'; render(); return; } S = {lv:{}, n:{}, wrong:[], bm:[], ses:null, last:{}, theme:S.theme}; armed = null; save(); toast('기록을 지웠어요'); go('home'); };
   document.querySelectorAll('[data-th]').forEach(b => b.onclick = () => { S.theme = b.dataset.th; save(); applyTheme(); render(); });
@@ -4003,5 +4071,6 @@ document.addEventListener('keydown', e => {
 });
 
 render();
+if (GHS && GHS.gist) ghPull(true).catch(e => ghSetStatus('불러오기 실패: ' + e.message));
 </script>
 </body></html>
