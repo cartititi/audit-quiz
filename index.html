@@ -73,7 +73,7 @@ details.ctx>summary{padding:10px 14px;cursor:pointer;font-weight:600;font-size:1
 table{border-collapse:collapse;width:100%;margin:8px 0;font-size:14px;display:block;overflow-x:auto}
 th,td{border:1px solid var(--rule);padding:6px 8px;vertical-align:top;text-align:left}
 th{background:var(--accent-soft);font-weight:600;white-space:nowrap}
-table.plan td{text-align:center;vertical-align:middle;min-width:56px}
+table.plan{display:table;table-layout:fixed;font-size:12.5px;line-height:1.4} table.plan td{text-align:center;vertical-align:middle;padding:4px 2px;word-break:keep-all;overflow-wrap:anywhere}
 table.tl td{border:none;text-align:center;padding:2px 4px;white-space:nowrap}
 .ox{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .opt{border:2px solid var(--rule);background:var(--surface);border-radius:12px;padding:16px;font-size:24px;font-weight:700}
@@ -136,7 +136,6 @@ function stats(list) { const st = {m: 0, l: 0, w: 0, n: 0, t: list.length}; list
 const bar = st => `<div class="bar">${['m', 'l', 'w'].map(k => st[k] ? `<i class="${k}" style="width:${st[k] / st.t * 100}%"></i>` : '').join('')}</div>`;
 const legend = (st, a, b) => `<div class="legend"><span class="lm">${a} ${st.m}</span><span class="ll">${b} ${st.l}</span><span class="lw">다시 ${st.w}</span><span>안 함 ${st.n}</span></div>`;
 const srcLine = q => `<div class="src">문제 ${esc(q.src)}<br>해답 ${esc(q.asrc)}</div>`;
-const ctxHtml = (q, open) => q.cx && CTX[q.cx] ? `<details class="ctx"${open ? ' open' : ''}><summary>${q.k === 'ox' ? '지시문' : '지문 보기'} · ${esc(GM[q.tg].name)} ${esc(GM[q.tg].title)}</summary><div class="ctxb">${CTX[q.cx]}</div></details>` : '';
 function modelHtml(m) { return String(m || '').split('\n').map(l => /^\s*<table/.test(l) ? l : `<p>${l}</p>`).join(''); }
 const oxMark = q => q.a ? '<span class="mark o">○</span>' : '<span class="mark x">×</span>';
 
@@ -171,8 +170,8 @@ function homeView() {
     <section class="card stack">
       <div class="row" style="justify-content:space-between"><span class="eyebrow">서술형 · 사례연구 외우기 · ${es.length}문항</span><span class="mono small">${se.m}/${se.t} 외움</span></div>
       ${bar(se)}${legend(se, '외움', '한 번')}
-      <div class="small muted">해답편 답안을 가리고 떠올리기 → 첫 글자 힌트 → 빈칸 → 직접 써 보고 비교, 순서로 외워요.</div>
-      <div class="row"><button class="btn pri" style="flex:1" data-act="esLeft" ${esLeft ? '' : 'disabled'}>못 외운 것 (${esLeft})</button><button class="btn" style="flex:1" data-act="esAll">순서대로 전체</button></div>
+      <div class="small muted">지문 전체와 요구사항을 한 화면에 모두 보여줘요. 답안은 가리기 → 첫 글자 힌트 → 빈칸 → 써 보고 비교 순서로 외워요.</div>
+      <div class="row"><button class="btn pri" style="flex:1" data-act="esLeft" ${esLeft ? '' : 'disabled'}>못 외운 것 (${esLeft})</button><button class="btn" style="flex:1" data-act="esAll">지문 순서대로 전체</button></div>
     </section>
     <div class="grid2">
       <button class="tile" data-go="list" data-p="ox"><span class="eyebrow">모아보기</span><b>O/X 문제 + 해답</b><span class="small muted">장별 전체 목록</span></button>
@@ -197,7 +196,7 @@ function listView() {
     ${groups.map(g => `
     <section class="card">
       <div class="eyebrow">${esc(g.name)}</div><h2 style="margin:2px 0 8px">${esc(g.title)}</h2>
-      ${k === 'essay' && CTX[g.g] ? `<details class="ctx"><summary>지문 보기</summary><div class="ctxb">${CTX[g.g]}</div></details>` : ''}
+      ${k === 'essay' && CTX[g.g] ? `<div class="box"><div class="eyebrow">지문</div><div class="ctxb" style="padding:4px 0 0">${CTX[g.g]}</div></div>` : ''}
       ${k === 'ox' && CTX[g.g] ? `<div class="small muted" style="margin-bottom:6px">${CTX[g.g].replace(/<[^>]+>/g, '')}</div>` : ''}
       <div class="list">${g.qs.map(q => `
         <div class="item">
@@ -259,10 +258,22 @@ function bind() {
   A('redo', () => { const r = S.last; const f = {}; r.res.forEach(x => { if (!(x[0] in f)) f[x[0]] = x[1]; }); start('mix', Object.keys(f).filter(id => !f[id]), r.title + ' · 다시'); });
 }
 
-/* ---------- 세션 ---------- */
+/* ---------- 세션: O/X는 문항 id, 서술형은 {g, ids} 지문 묶음 ---------- */
+function items(list) {
+  const out = [], at = {};
+  list.forEach(id => {
+    const q = QM[id]; if (!q) return;
+    if (q.k === 'ox') return out.push(id);
+    if (at[q.tg] === undefined) { at[q.tg] = out.length; out.push({g: q.tg, ids: []}); }
+    out[at[q.tg]].ids.push(id);
+  });
+  out.forEach(x => { if (typeof x === 'object') x.ids.sort((a, b) => QS.indexOf(QM[a]) - QS.indexOf(QM[b])); });
+  return out;
+}
 function start(kind, list, title) {
-  if (!list.length) return toast('풀 문제가 없어요');
-  S.ses = {kind, title, q: list, i: 0, req: {}, res: []}; save(); go('quiz');
+  const q = items(list);
+  if (!q.length) return toast('풀 문제가 없어요');
+  S.ses = {kind, title, q, i: 0, req: {}, res: []}; save(); go('quiz');
 }
 function record(id, ok) {
   const v = S.lv[id];
@@ -270,22 +281,24 @@ function record(id, ok) {
   if (ok) { if (S.lv[id] >= 2) S.wrong = S.wrong.filter(x => x !== id); }
   else if (!S.wrong.includes(id)) S.wrong.push(id);
 }
+const itemKey = it => typeof it === 'string' ? it : 'G:' + it.g;
 function renderQuiz(app) {
   const ses = S.ses; if (!ses) return go('home');
   if (ses.i >= ses.q.length) { S.last = ses; S.ses = null; save(); return go('result'); }
-  const id = ses.q[ses.i], q = QM[id];
+  const it = ses.q[ses.i];
+  if (typeof it === 'object') return groupUI(app, it);
+  const id = it, q = QM[id];
   cur = {id, q, done: false};
   const again = (ses.req[id] || 0) > 0;
-  const st = {m: ses.i, l: 0, w: 0, n: ses.q.length - ses.i, t: ses.q.length};
   app.innerHTML = `
   <div class="wrap">
-    <div class="topbar"><button class="iconbtn" id="qx" aria-label="그만하고 홈으로">✕</button><div style="flex:1">${bar(st)}</div><span class="mono small">${ses.i + 1}/${ses.q.length}</span></div>
+    ${qTop()}
     <div class="stack" style="margin-top:10px">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap">
-        <div class="qmeta"><span class="mono">${esc(q.tb)}</span><span class="badge">${q.k === 'ox' ? 'O/X' : '서술형'}</span>${again ? '<span class="badge w">다시 확인</span>' : ''}</div>
-        <button class="star ${S.bm.includes(id) ? 'on' : ''}" id="qbm" aria-label="북마크">${S.bm.includes(id) ? '★' : '☆'}</button>
+        <div class="qmeta"><span class="mono">${esc(q.tb)}</span><span class="badge">O/X</span>${again ? '<span class="badge w">다시 확인</span>' : ''}</div>
+        ${starBtn(id)}
       </div>
-      ${ctxHtml(q, q.k === 'essay')}
+      ${CTX[q.cx] ? `<div class="small muted">${CTX[q.cx].replace(/<[^>]+>/g, '')}</div>` : ''}
       <div class="qtext">${q.q}</div>
       <div id="qa"></div>
       <div id="fb"></div>
@@ -293,9 +306,17 @@ function renderQuiz(app) {
     </div>
   </div>
   <div class="actionbar"><div class="in" id="act"></div></div>`;
+  bindTop();
+  oxUI();
+}
+function qTop() {
+  const ses = S.ses, st = {m: ses.i, l: 0, w: 0, n: ses.q.length - ses.i, t: ses.q.length};
+  return `<div class="topbar"><button class="iconbtn" id="qx" aria-label="그만하고 홈으로">✕</button><div style="flex:1">${bar(st)}</div><span class="mono small">${ses.i + 1}/${ses.q.length}</span></div>`;
+}
+const starBtn = id => `<button class="star ${S.bm.includes(id) ? 'on' : ''}" data-star="${id}" aria-label="북마크">${S.bm.includes(id) ? '★' : '☆'}</button>`;
+function bindTop() {
   $('#qx').onclick = () => { save(); go('home'); };
-  $('#qbm').onclick = () => { const b = $('#qbm'); if (S.bm.includes(id)) S.bm = S.bm.filter(x => x !== id); else S.bm.push(id); save(); b.classList.toggle('on'); b.textContent = S.bm.includes(id) ? '★' : '☆'; };
-  if (q.k === 'ox') oxUI(); else essayUI();
+  document.querySelectorAll('[data-star]').forEach(b => b.onclick = () => { const id = b.dataset.star; if (S.bm.includes(id)) S.bm = S.bm.filter(x => x !== id); else S.bm.push(id); save(); b.classList.toggle('on'); b.textContent = S.bm.includes(id) ? '★' : '☆'; });
 }
 
 /* ---------- O/X ---------- */
@@ -308,40 +329,75 @@ function oxUI() {
 function chooseOx(v) {
   const q = cur.q, ok = v !== null && (v === '1') === q.a;
   document.querySelectorAll('#qa .opt').forEach(b => { const isAns = (b.dataset.v === '1') === q.a; if (isAns) b.classList.add('ok'); else if (b.dataset.v === v) b.classList.add('bad'); b.disabled = true; });
-  finish(ok);
+  finishOx(ok);
   $('#fb').innerHTML = `<div class="fb ${ok ? 'ok' : 'bad'}"><div class="h">${ok ? '정답 ✓' : v === null ? '정답 확인' : '틀렸어요 ✗'}</div>
     <div class="small">${ok ? (S.lv[q.id] >= 2 ? '2번 연속 맞힘 · 완료' : '한 번 더 맞히면 완료') : '이 회차 안에서 다시 나와요 · 오답노트에 추가'}</div>
     <div style="margin-top:8px">${oxMark(q)}${q.ex ? esc(q.ex) : '<span class="small muted">(해답편에 해설 없이 ○만 표시)</span>'}</div></div>`;
-  nextBar();
+  $('#act').innerHTML = `<button class="btn pri" id="bNext">다음 →</button>`; $('#bNext').onclick = advance;
+  setTimeout(() => $('#fb')?.scrollIntoView({block: 'nearest', behavior: 'smooth'}), 30);
+}
+function finishOx(ok) {
+  const ses = S.ses, id = cur.id;
+  if (cur.done) return; cur.done = true;
+  record(id, ok); ses.res.push([id, ok ? 1 : 0]);
+  if (!ok && (ses.req[id] || 0) < 2) { ses.req[id] = (ses.req[id] || 0) + 1; ses.q.splice(Math.min(ses.q.length, ses.i + 4), 0, id); }
+  ses.i++; save();
 }
 
-/* ---------- 서술형 외우기 ---------- */
+/* ---------- 서술형: 지문 전체 + 요구사항 전부 ---------- */
 const MODES = [['cover', '가리고 떠올리기'], ['first', '첫 글자 힌트'], ['blank', '빈칸 40%'], ['blank2', '빈칸 80%'], ['write', '직접 써 보기'], ['open', '답안 펼치기']];
-function essayUI() {
-  const q = cur.q, m = MODES.some(x => x[0] === S.mode) ? S.mode : 'cover';
-  $('#qa').innerHTML = `<div class="stack">
-    <div class="modes noprint">${MODES.map(([k, v]) => `<button class="${m === k ? 'on' : ''}" data-m="${k}">${v}</button>`).join('')}</div>
-    ${m === 'write' ? `<textarea class="field" id="essay" placeholder="해답편 답안을 떠올리며 써 보세요. 자동 저장돼요.">${esc(S.drafts[q.id] || '')}</textarea><button class="btn" id="bCmp">해답과 비교</button>` : ''}
-    <section class="card"><div class="eyebrow">해답편 답안</div><div id="model" class="model" style="margin-top:6px"></div></section>
-    <div class="small muted" id="mhelp"></div>
-  </div>`;
-  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; save(); essayUI(); });
-  const box = $('#model');
-  if (m === 'cover' || m === 'write') {
-    box.innerHTML = `<div class="cover" id="cov">${m === 'write' ? '다 쓰고 「해답과 비교」를 누르거나, 여기를 눌러 답안 보기' : '머릿속으로 답을 떠올린 다음 눌러서 확인'}</div>`;
-    $('#cov').onclick = () => { box.innerHTML = modelHtml(q.model); };
-  } else {
-    box.innerHTML = modelHtml(q.model);
-    if (m !== 'open') { wrapWords(box); maskWords(box, m); $('#mhelp').textContent = '가려진 칸이나 힌트 글자를 누르면 그 단어만 보여요.'; }
-  }
-  if (m === 'write') {
-    const ta = $('#essay'); ta.oninput = () => { S.drafts[q.id] = ta.value; save(); };
-    $('#bCmp').onclick = () => compare(box, ta.value);
-  }
-  $('#act').innerHTML = `<button class="btn sub" id="bSkip">건너뛰기</button><button class="btn" id="bNo">아직 못 외움</button><button class="btn pri" id="bYes">외웠어요</button>`;
+function groupUI(app, it) {
+  const ses = S.ses, g = GM[it.g], key = itemKey(it), again = (ses.req[key] || 0) > 0;
+  const m = MODES.some(x => x[0] === S.mode) ? S.mode : 'cover';
+  cur = {grp: it, rate: {}};
+  app.innerHTML = `
+  <div class="wrap">
+    ${qTop()}
+    <div class="stack" style="margin-top:10px">
+      <div class="qmeta"><span class="mono">${esc(g.name)}</span><span class="badge">서술형</span>${again ? '<span class="badge w">다시 확인</span>' : ''}<span>요구사항 ${it.ids.length}개</span></div>
+      <h2>${esc(g.title)}</h2>
+      ${CTX[it.g] ? `<section class="card"><div class="eyebrow">지문</div><div class="ctxb" style="padding:6px 0 0">${CTX[it.g]}</div></section>` : ''}
+      <div class="modes noprint">${MODES.map(([k, v]) => `<button class="${m === k ? 'on' : ''}" data-m="${k}">${v}</button>`).join('')}</div>
+      ${it.ids.map(id => { const q = QM[id]; return `
+      <section class="card stack" data-q="${id}">
+        <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div class="qmeta"><span class="mono">${esc(q.tb)}</span></div>${starBtn(id)}</div>
+        <div class="qtext">${q.q}</div>
+        ${m === 'write' ? `<textarea class="field" data-ta="${id}" placeholder="해답편 답안을 떠올리며 써 보세요. 자동 저장돼요.">${esc(S.drafts[id] || '')}</textarea><button class="btn" data-cmp="${id}">해답과 비교</button>` : ''}
+        <div><div class="eyebrow">해답편 답안</div><div class="model" data-model="${id}" style="margin-top:6px"></div><div class="small muted" data-help="${id}"></div></div>
+        <div class="row"><button class="btn" style="flex:1" data-rate="0" data-id="${id}">아직 못 외움</button><button class="btn" style="flex:1" data-rate="1" data-id="${id}">외웠어요</button></div>
+        ${srcLine(q)}
+      </section>`; }).join('')}
+    </div>
+  </div>
+  <div class="actionbar"><div class="in"><button class="btn sub" id="bSkip">건너뛰기</button><button class="btn pri" id="bNext">다음 지문 →</button></div></div>`;
+  bindTop();
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; save(); const y = window.scrollY; groupUI(app, it); window.scrollTo(0, y); });
+  it.ids.forEach(id => {
+    const box = document.querySelector(`[data-model="${id}"]`), help = document.querySelector(`[data-help="${id}"]`), model = QM[id].model;
+    if (m === 'cover' || m === 'write') {
+      box.innerHTML = `<div class="cover">${m === 'write' ? '다 쓰고 「해답과 비교」를 누르거나, 여기를 눌러 답안 보기' : '머릿속으로 답을 떠올린 다음 눌러서 확인'}</div>`;
+      box.firstChild.onclick = () => { box.innerHTML = modelHtml(model); };
+    } else {
+      box.innerHTML = modelHtml(model);
+      if (m !== 'open') { wrapWords(box); maskWords(box, m); help.textContent = '가려진 칸이나 힌트 글자를 누르면 그 단어만 보여요.'; }
+    }
+  });
+  document.querySelectorAll('[data-ta]').forEach(ta => ta.oninput = () => { S.drafts[ta.dataset.ta] = ta.value; save(); });
+  document.querySelectorAll('[data-cmp]').forEach(b => b.onclick = () => { const id = b.dataset.cmp; compare(document.querySelector(`[data-model="${id}"]`), document.querySelector(`[data-help="${id}"]`), QM[id].model, document.querySelector(`[data-ta="${id}"]`).value); });
+  document.querySelectorAll('[data-rate]').forEach(b => b.onclick = () => {
+    const id = b.dataset.id; cur.rate[id] = b.dataset.rate === '1';
+    document.querySelectorAll(`[data-id="${id}"]`).forEach(x => { x.classList.remove('pri'); x.style.background = ''; x.style.color = ''; x.style.borderColor = ''; });
+    if (cur.rate[id]) b.classList.add('pri'); else { b.style.background = 'var(--wrong-soft)'; b.style.color = 'var(--wrong)'; b.style.borderColor = 'var(--wrong)'; }
+  });
   $('#bSkip').onclick = skip;
-  $('#bNo').onclick = () => { finish(false); toast('이 회차 안에서 다시 나와요'); advance(); };
-  $('#bYes').onclick = () => { finish(true); toast(S.lv[q.id] >= 2 ? '외움 완료' : '한 번 더 확인하면 완료'); advance(); };
+  $('#bNext').onclick = () => finishGroup(it);
+}
+function finishGroup(it) {
+  const ses = S.ses, fail = [];
+  it.ids.forEach(id => { if (!(id in cur.rate)) return; const ok = cur.rate[id]; record(id, ok); ses.res.push([id, ok ? 1 : 0]); if (!ok) fail.push(id); });
+  const key = itemKey(it);
+  if (fail.length && (ses.req[key] || 0) < 2) { ses.req[key] = (ses.req[key] || 0) + 1; ses.q.splice(Math.min(ses.q.length, ses.i + 3), 0, {g: it.g, ids: fail}); toast('못 외운 문항은 이 회차에서 다시 나와요'); }
+  ses.i++; save(); advance();
 }
 const KEEP = /^([(（]?\d+[)）.]?|[①-⑳•·※\-－=×]|[(（]?[가-힣][)）.]|\d+\.)$/;
 function wrapWords(root) {
@@ -366,8 +422,8 @@ function maskWords(root, m) {
     s.onclick = () => { s.textContent = t; s.classList.remove('blk', 'hint'); };
   });
 }
-function compare(box, txt) {
-  box.innerHTML = modelHtml(cur.q.model); wrapWords(box);
+function compare(box, help, model, txt) {
+  box.innerHTML = modelHtml(model); wrapWords(box);
   const nt = txt.replace(/\s+/g, '');
   let hit = 0, tot = 0;
   box.querySelectorAll('.w').forEach(s => {
@@ -376,19 +432,11 @@ function compare(box, txt) {
     const stem = [...core].length >= 3 ? [...core].slice(0, -1).join('') : core;
     tot++; if (nt.includes(stem)) { hit++; s.classList.add('hit'); } else s.classList.add('miss');
   });
-  $('#mhelp').innerHTML = `답안 낱말 ${tot}개 중 <b>${hit}개</b>(${tot ? Math.round(hit / tot * 100) : 0}%)가 내 답에 들어 있어요. 빨간 낱말이 빠진 부분이에요. 스스로 판단해서 아래 버튼을 눌러 주세요.`;
+  help.innerHTML = `답안 낱말 ${tot}개 중 <b>${hit}개</b>(${tot ? Math.round(hit / tot * 100) : 0}%)가 내 답에 들어 있어요. 빨간 낱말이 빠진 부분이에요.`;
 }
 
 /* ---------- 공통 ---------- */
-function finish(ok) {
-  const ses = S.ses, id = cur.id;
-  if (cur.done) return; cur.done = true;
-  record(id, ok); ses.res.push([id, ok ? 1 : 0]);
-  if (!ok && (ses.req[id] || 0) < 2) { ses.req[id] = (ses.req[id] || 0) + 1; ses.q.splice(Math.min(ses.q.length, ses.i + 4), 0, id); }
-  ses.i++; save();
-}
 function skip() { const ses = S.ses; ses.q.splice(ses.i, 1); save(); toast('건너뛰었어요'); advance(); }
-function nextBar() { $('#act').innerHTML = `<button class="btn pri" id="bNext">다음 →</button>`; $('#bNext').onclick = advance; setTimeout(() => $('#fb')?.scrollIntoView({block: 'nearest', behavior: 'smooth'}), 30); }
 function advance() { renderQuiz($('#app')); window.scrollTo(0, 0); }
 
 render();
