@@ -15,8 +15,9 @@ import difflib, glob, json, os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def norm(s):
-    s = re.sub(r'<[^>]+>', ' ', s)
+def norm(s, html=True):
+    # OCR 텍스트에는 태그 제거를 하지 않는다: 짝 안 맞는 '<'가 있으면 그 뒤 수천 자가 지워진다
+    if html: s = re.sub(r'<[^>]+>', ' ', s)
     return re.sub(r'[\s·・•\-－–—~∼〜‘’“”"\'`.,:;()\[\]〈〉<>|│*※]', '', s)
 
 
@@ -42,11 +43,11 @@ def main():
     texts += [(q['id'] + ' 해답', q.get('model') or q.get('ex') or '') for q in qs]
     M = norm(' '.join(t for _, t in texts))
     ocr = {os.path.basename(p): open(p, encoding='utf-8').read().split('\n') for p in sorted(glob.glob(os.path.join(txtdir, '*.txt')))}
-    O = norm(' '.join(' '.join(v) for v in ocr.values()))
+    O = norm(' '.join(' '.join(v) for v in ocr.values()), html=False)
     print('== 1) 원본 OCR 줄 중 전사본에 잘 안 맞는 것 (머리글·OCR 오인식이 대부분)')
     for img, lines in ocr.items():
         for l in lines:
-            n = norm(l)
+            n = norm(l, html=False)
             if len(n) >= 8 and best(n, M) < .8: print(f'  {img}: {l}')
     print('== 2) 전사 구간 중 원본 OCR에 잘 안 맞는 것')
     for key, txt in texts:
@@ -57,7 +58,7 @@ def main():
     print('== 3) 전사본 숫자 중 OCR에 없는 것 (반드시 원본 확대 확인)')
     allt = re.sub(r'<[^>]+>', ' ', ' '.join(t for _, t in texts))
     On = O.replace(' ', '')
-    for n in sorted({x for x in re.findall(r'\d[\d,\.]*\d', allt) if len(x) >= 3 and x not in On}):
+    for n in sorted({x for x in re.findall(r'\d[\d,\.]*\d', allt) if len(x) >= 3 and re.sub(r'[,.]', '', x) not in On}):
         print('  ', n)
 
 

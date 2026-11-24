@@ -52,17 +52,24 @@ O/X : {"id":"TB12-TF01","ch":12,"k":"ox","tb":"12장 진위 (1)","tg":"12-진위
 4. **데이터 병합**: `data/questions.json`에 groups·ctx·questions·meta.chapters 추가. 기존 문항은 건드리지 않는다.
 5. **재대조**(사용자 요구사항): 
    ```
-   swiftc -O tools/vision_ocr.swift -o <scratchpad>/vocr
+   swiftc -O -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk tools/vision_ocr.swift -o <scratchpad>/vocr
    <scratchpad>/vocr <scratchpad>/vision <축소본폴더>/*.JPG
    python3 -I tools/verify_ocr.py <scratchpad>/vision --ch 12,13,14
    ```
+   (`-sdk` 없이 하면 "SDK is not supported by the compiler" 오류: 기본 SDK(27)가 컴파일러보다 새것이라서. OCR을 전사 전에 미리 돌려 두면 초안 대조용으로도 쓸 수 있다.)
    나온 구간은 '의심'일 뿐이다(대부분 머리글·OCR 오인식). 원본을 확대해서 확인하고 **실제 불일치만** 고친 뒤 목록으로 보고한다. 숫자 목록은 하나씩 원본 확대로 확인(1차분에서는 OCR이 틀리고 전사가 맞았다).
 6. **빌드**: `cd audit-quiz-main && python3 -I tools/build.py` (검증 실패 시 메시지대로 고친다). 앱 코드를 고쳤다면 `node --check`로 스크립트 문법 확인, 헤드리스 크롬으로 화면 확인(헤드리스 최소 폭이 500px이라 휴대폰 폭은 375px iframe에 넣어 스크린샷).
 7. **배포**: `gh repo clone cartititi/audit-quiz <scratchpad>/repo` → `index.html`, `data/`, `tools/`, `CLAUDE.md`를 복사 → 커밋(메시지 끝에 Co-Authored-By 줄) → `git push origin main` → `gh api repos/cartititi/audit-quiz/pages/builds/latest`가 `built`가 될 때까지 확인.
 8. **최종 보고**: 장별 문항 수, 해답 없는 문항, `[?]` 목록, 재대조 불일치 목록, 원문 그대로 둔 곳.
 
-## 현재 상태 (2026-11-17)
-- 수록: 6·7·9장 연습문제(진위·서술·사례연구) + 해답편 → 103문항 (O/X 48, 서술 55), 전부 해답 연결
-- 출처 사진: `기말/IMG_7610~7656` (IMG_7650 원래 없음, 내용 누락 없음)
-- 마지막 배포 커밋: `621e1e2` 이후 이 문서·도구 추가 커밋
+## 보류 문항 (`data/pending.json`)
+- 해답 사진이 없어 앱에서 뺀 문항. 형식은 questions.json과 같고(`groups`·`ctx`·`questions`), 문항마다 `pending`(사유)과 `partial`(남은 쪽에 보이는 해답 일부)이 있다. O/X는 `a`가 null.
+- 해답 사진을 받으면: 해당 문항의 `model`(O/X는 `a`·`ex`)과 `asrc`를 채우고 `pending`·`partial`을 지운 뒤 questions.json으로 옮긴다(그룹·ctx도 함께, groups 순서는 장·번호순). 그 그룹의 다른 문항이 이미 앱에 있으면 ctx는 이미 있다.
+- 빌드 검증은 questions.json만 본다.
+
+## 현재 상태 (2026-11-24)
+- 수록: 6·7·9장(1차) + 12~16장(2차) → 204문항, 전부 해답 연결. 12장 23, 13장 23, 14장 30, 15장 16, 16장 9
+- 보류 72문항 (pending.json): 14장 9, 15장 31, 16장 32 — `기말2(12~끝)` 폴더의 "JPEG 이미지-…jpeg" 9개가 135바이트 빈 파일(복사 실패)이라 해답편 p.118–119, 121–123, 126, 128–131, 133이 없음. 빠진 번호 IMG_7853·7854·7856·7859·7861~7864·7866. p.120(7855)→p.124(7857) 사이 3쪽에 번호는 7856 하나뿐이라 2쪽은 촬영 자체가 안 됐을 수 있음
+- 출처 사진: `기말/IMG_7610~7656`, `기말2(12~끝)/IMG_7793~7870` (문제 p.553–733 연속, 해답 p.102–137 중 위 쪽 누락)
+- verify_ocr.py 수정(2026-11-24): OCR 텍스트에 태그 제거 정규식을 적용해 짝 안 맞는 '<' 뒤가 통째로 지워지던 문제, 숫자 비교 때 쉼표 때문에 모든 숫자가 '없음'으로 나오던 문제
 - 원문 그대로 둔 곳: 6장 사례연구 "감사계약을 제한하며", 7장 서술③ 해답 "(2) 급여이체명세서를 감독관에게 보내지 않고 있다" (data의 notes에 기록됨)
