@@ -145,7 +145,7 @@ function go(v, p = null) { view = v; param = p; render(); window.scrollTo(0, 0);
 function render() {
   const app = $('#app');
   if (view === 'quiz') return renderQuiz(app);
-  const body = view === 'list' ? listView() : view === 'notes' ? notesView() : view === 'result' ? resultView() : homeView();
+  const body = view === 'list' ? listView() : view === 'notes' ? notesView() : view === 'result' ? resultView() : view === 'map' ? mapView() : homeView();
   app.innerHTML = `<div class="wrap">${body}</div>`;
   bind();
 }
@@ -162,6 +162,7 @@ function homeView() {
     <p class="small muted" style="margin:0">교재 ${CHS.join('·')}장 연습문제와 해답편을 사진에서 원문 그대로 옮겼어요. 해설·답안도 해답편 문장 그대로예요.</p>
     <div class="filt">${[0, ...CHS].map(c => `<button class="${S.ch === c ? 'on' : ''}" data-ch="${c}">${c ? c + '장' : '전체'}</button>`).join('')}</div>
     ${S.ch ? `<div class="small muted">${S.ch}장 ${esc(CHN[S.ch])}</div>` : ''}
+    <button class="tile" data-go="map" style="min-height:0;width:100%"><span class="eyebrow">개념 지도</span><b>감사의 전체 흐름 · 장별 위치</b><span class="small muted">Claude 정리 · 교재 원문 아님</span></button>
     ${ses ? `<button class="tile" data-act="resume" style="min-height:0"><span class="eyebrow">이어서 하기</span><b>${esc(ses.title)}</b><span class="small muted">${ses.i} / ${ses.q.length} 진행</span></button>` : ''}
     <section class="card stack">
       <div class="row" style="justify-content:space-between"><span class="eyebrow">O/X 진위형 · ${ox.length}문항</span><span class="mono small">${so.m + so.l}/${so.t} 맞힘</span></div>
@@ -224,6 +225,49 @@ function notesView() {
   </div>`;
 }
 
+/* ---------- 개념 지도 (Claude 정리 · 교재 원문 아님 · 문항 데이터와 분리) ---------- */
+const MAP = [
+  {n: '①', t: '시작 · 계획', ch: [6], d: '이 회사를 맡을지 정하고 기업을 이해한 뒤, 어디가 틀리기 쉬운지(위험)를 보고 계획을 세운다.'},
+  {n: '②', t: '내부통제 평가', ch: [7], d: '회사가 스스로 오류를 걸러내는 장치가 잘 돌아가는지 테스트한다(통제테스트). 잘 돌아가면 ③에서 덜 보고, 허술하면 더 많이 본다.'},
+  {n: '③', t: '거래 사이클별 실증절차', ch: [9, 12, 13, 14], d: '장부의 숫자를 직접 확인한다. 9장 매출→매출채권 · 12장 구매→매입채무·유형자산 · 13장 재고·생산 · 14장 자금(현금·차입금·금융자산)'},
+  {n: '④', t: '종료절차', ch: [15], d: '결산일 뒤 사건, 계속기업, 특수관계자, 경영진서면진술을 확인하고, 못 고친 왜곡표시를 합쳐 중요한지 판단한다.'},
+  {n: '⑤', t: '보고', ch: [16], d: '적정 / 한정 / 부적정 / 의견거절 중 하나를 골라 감사보고서를 쓴다.'},
+];
+function mapView() {
+  const chBtns = chs => chs.filter(c => CHN[c]).map(c => `<button class="btn sub small" data-mapch="${c}" style="min-height:36px;padding:4px 10px">${c}장 서술형 보기</button>`).join('');
+  return `
+  <header class="topbar"><button class="iconbtn" data-go="home" aria-label="뒤로">←</button><h1>개념 지도</h1></header>
+  <div class="stack" style="margin-top:8px">
+    <div class="fb" style="background:var(--flag-soft);border-color:var(--flag)"><b>Claude가 정리한 흐름이에요. 교재·해답편 문장이 아니에요.</b><div class="small">흐름을 잡는 용도로만 보고, 답안은 해답편 문장으로 외우세요.</div></div>
+    <section class="card stack"><div class="eyebrow">핵심 질문</div><div class="qtext">"이 회사 재무제표가 중요하게 틀린 곳 없이 작성됐는가?"</div><div class="small muted">감사인은 증거를 모아 이 질문에 답하고, 그 답을 감사보고서(의견)로 낸다.</div></section>
+    ${MAP.map((s, i) => `
+    <section class="card stack">
+      <div class="row" style="justify-content:space-between"><span class="eyebrow">${s.n} ${esc(s.t)}</span><span class="mono small muted">${s.ch.join('·')}장</span></div>
+      <div>${esc(s.d)}</div>
+      <div class="small muted">${s.ch.filter(c => CHN[c]).map(c => `${c}장 ${esc(CHN[c])}`).join('<br>')}</div>
+      <div class="row">${chBtns(s.ch)}</div>
+    </section>${i < MAP.length - 1 ? '<div class="muted" style="text-align:center;margin-top:4px">↓</div>' : ''}`).join('')}
+    <section class="card stack"><div class="eyebrow">개념 1 · 위험 기반 감사 (6·7장이 ③의 분량을 정한다)</div>
+      <div class="qtext mono" style="font-size:15px">감사위험 = 고유위험 × 통제위험 × 적발위험</div>
+      <div class="small">6장에서 고유위험(사업 자체가 틀리기 쉬운 정도), 7장에서 통제위험(내부통제가 못 막을 위험)을 평가한다. 둘이 높을수록 적발위험을 낮춰야 하므로 실증절차를 더 많이, 결산일에 더 가깝게, 더 강한 방법으로 한다(6장 서술④ 감사절차의 적용시기).</div></section>
+    <section class="card stack"><div class="eyebrow">개념 2 · 통제테스트 vs 실증절차</div>
+      <table style="display:table"><tr><th>통제테스트</th><td>절차가 지켜졌는지 확인 (승인 서명, 검수 후 입고 등)</td></tr><tr><th>실증절차</th><td>금액이 맞는지 직접 확인 (외부조회, 실사입회, 분석적절차, 세부테스트)</td></tr></table></section>
+    <section class="card stack"><div class="eyebrow">개념 3 · 계정별 핵심 위험과 대표 절차</div>
+      <table><tr><th>장</th><th>계정</th><th>주로 걱정</th><th>대표 절차</th></tr>
+        <tr><td>9</td><td>매출·매출채권</td><td>과대계상(실재성)</td><td>매출채권 외부조회, 매출 기간귀속</td></tr>
+        <tr><td>12</td><td>매입채무</td><td>과소계상(완전성) = 부외부채</td><td>결산일 뒤 지급 내역 추적</td></tr>
+        <tr><td>12</td><td>유형자산</td><td>실재성, 평가</td><td>실물 확인, 감가상각비 분석적절차</td></tr>
+        <tr><td>13</td><td>재고자산</td><td>실재성, 기간귀속</td><td>재고실사 입회, 입출고 기간귀속(cut-off)</td></tr>
+        <tr><td>14</td><td>현금·차입금</td><td>횡령, 부외부채</td><td>은행조회, 어음·수표 확인, 후속기간 검토</td></tr></table></section>
+    <section class="card stack"><div class="eyebrow">16장 · 감사의견 2×2</div>
+      <table style="display:table"><tr><th></th><th>중요 · 전반적 아님</th><th>중요하고 전반적</th></tr>
+        <tr><th>왜곡표시 있음</th><td>한정</td><td>부적정</td></tr>
+        <tr><th>증거 못 얻음(범위제한)</th><td>한정</td><td>의견거절</td></tr></table></section>
+    <section class="card stack"><div class="eyebrow">외울 때</div>
+      <div class="small">서술형마다 세 가지를 붙여 본다.<br>1. 흐름의 어느 단계인가? (①~⑤)<br>2. 통제테스트인가, 실증절차인가?<br>3. 어떤 감사목표를 겨냥하는가? (실재성 / 완전성 / 기간귀속 / 평가 …)</div></section>
+  </div>`;
+}
+
 /* ---------- 결과 ---------- */
 function resultView() {
   const r = S.last; if (!r) return homeView();
@@ -243,6 +287,7 @@ function resultView() {
 function bind() {
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go, b.dataset.p || null));
   document.querySelectorAll('[data-ch]').forEach(b => b.onclick = () => { S.ch = +b.dataset.ch; save(); render(); });
+  document.querySelectorAll('[data-mapch]').forEach(b => b.onclick = () => { S.ch = +b.dataset.mapch; save(); go('list', 'essay'); });
   document.querySelectorAll('[data-rv]').forEach(c => c.onclick = () => { c.hidden = true; c.nextElementSibling.hidden = false; });
   const A = (k, f) => { const b = document.querySelector(`[data-act="${k}"]`); if (b) b.onclick = f; };
   A('theme', () => { S.theme = {system: 'light', light: 'dark', dark: 'system'}[S.theme]; applyTheme(); save(); render(); });
